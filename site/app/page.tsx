@@ -97,6 +97,17 @@ function routeFeatures(days: Day[], selectedDay: number) {
   }));
 }
 
+function fullRouteFeature(days: Day[]) {
+  return {
+    type: 'Feature' as const,
+    properties: {},
+    geometry: {
+      type: 'LineString' as const,
+      coordinates: concat(...days.filter((item) => item.points.length).map((item) => item.points)).map((point) => [point[0], point[1]]),
+    },
+  };
+}
+
 function ElevationChart({ points, hover }: { points: Point[]; hover: (point?: Point) => void }) {
   const chartPoints = useMemo(() => { if (!points.length) return []; const step = Math.max(1, Math.ceil(points.length / 420)); return points.filter((_, index) => index % step === 0 || index === points.length - 1); }, [points]);
   if (!chartPoints.length) return <div className="empty-profile">休整日不计精确距离，支线根据天气现场决定。</div>;
@@ -120,9 +131,11 @@ export default function Home() {
       const map = new Map({ container: mapContainer.current, center: [86.72, 27.86], zoom: 9.1, style: { version: 8, sources: {}, layers: [{ id: 'terrain-background', type: 'background', paint: { 'background-color': '#dfe4dc' } }] }, attributionControl: false });
       map.addControl(new NavigationControl({ showCompass: true }), 'top-right'); hoverMarker.current = new Marker({ color: '#111827', scale: 0.7 });
       map.on('load', () => {
+        map.addSource('full-route', { type: 'geojson', data: fullRouteFeature(initialDays) });
         map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: routeFeatures(initialDays, selectedDay) } });
-        map.addLayer({ id: 'route-shadow', type: 'line', source: 'routes', paint: { 'line-color': '#ffffff', 'line-width': 8, 'line-opacity': 0.88 } });
-        map.addLayer({ id: 'routes', type: 'line', source: 'routes', paint: { 'line-color': ['get', 'color'], 'line-width': ['case', ['get', 'selected'], 5, 3], 'line-opacity': ['case', ['get', 'selected'], 1, 0.58] }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+        map.addLayer({ id: 'route-shadow', type: 'line', source: 'full-route', paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.96 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+        map.addLayer({ id: 'full-route', type: 'line', source: 'full-route', paint: { 'line-color': '#4b5563', 'line-width': 6, 'line-opacity': 0.9 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+        map.addLayer({ id: 'routes', type: 'line', source: 'routes', paint: { 'line-color': ['get', 'color'], 'line-width': ['case', ['get', 'selected'], 7, 4], 'line-opacity': ['case', ['get', 'selected'], 1, 0.72] }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
         [
           ['帕克丁', '帕克丁'], ['Day1和day7南池住宿', '南池'], ['看到旁波切了', '旁波切'],
           ['Day2丁波切住宿', '丁波切'], ['Day3朱孔住宿', '朱孔'], ['Day4罗波切住宿', '罗波切'],
@@ -136,7 +149,6 @@ export default function Home() {
           new Marker({ element, anchor: 'bottom' }).setLngLat([place.coordinates[0], place.coordinates[1]]).addTo(map);
         });
         mapRef.current = map;
-        (window as unknown as { __ebcMap?: MapLibreMap }).__ebcMap = map;
         setMapReady(true);
       });
     }); return () => { cancelled = true; };
@@ -144,6 +156,8 @@ export default function Home() {
   useEffect(() => {
     const map = mapRef.current; if (!mapReady || !map || !days.length) return; const source = map.getSource('routes') as { setData: (data: unknown) => void } | undefined;
     source?.setData({ type: 'FeatureCollection', features: routeFeatures(days, selectedDay) });
+    const fullSource = map.getSource('full-route') as { setData: (data: unknown) => void } | undefined;
+    fullSource?.setData(fullRouteFeature(days));
     if (day?.points.length) { const lngs = day.points.map((point) => point[0]); const lats = day.points.map((point) => point[1]); map.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 54, duration: 650, maxZoom: 12.6 }); }
   }, [days, day, selectedDay, mapReady]);
   const summary = useMemo(() => days.reduce((result, item) => ({ distance: result.distance + item.distance, ascent: result.ascent + item.ascent, descent: result.descent + item.descent }), { distance: 0, ascent: 0, descent: 0 }), [days]);
