@@ -89,6 +89,14 @@ function buildItineraries(data: RouteData) {
   } as Record<number, Day[]>;
 }
 
+function routeFeatures(days: Day[], selectedDay: number) {
+  return days.filter((item) => item.points.length).map((item, index) => ({
+    type: 'Feature' as const,
+    properties: { color: ROUTE_COLORS[index % ROUTE_COLORS.length], selected: index === selectedDay },
+    geometry: { type: 'LineString' as const, coordinates: item.points.map((point) => [point[0], point[1]]) },
+  }));
+}
+
 function ElevationChart({ points, hover }: { points: Point[]; hover: (point?: Point) => void }) {
   const chartPoints = useMemo(() => { if (!points.length) return []; const step = Math.max(1, Math.ceil(points.length / 420)); return points.filter((_, index) => index % step === 0 || index === points.length - 1); }, [points]);
   if (!chartPoints.length) return <div className="empty-profile">休整日不计精确距离，支线根据天气现场决定。</div>;
@@ -106,12 +114,13 @@ export default function Home() {
   const day = days[Math.min(selectedDay, Math.max(days.length - 1, 0))];
   useEffect(() => {
     if (!mapContainer.current || mapRef.current || !data) return; let cancelled = false;
+    const initialDays = buildItineraries(data)[version] ?? [];
     import('maplibre-gl').then(({ Map, NavigationControl, Marker }) => {
       if (cancelled || !mapContainer.current) return;
       const map = new Map({ container: mapContainer.current, center: [86.72, 27.86], zoom: 9.1, style: { version: 8, sources: {}, layers: [{ id: 'terrain-background', type: 'background', paint: { 'background-color': '#dfe4dc' } }] }, attributionControl: false });
       map.addControl(new NavigationControl({ showCompass: true }), 'top-right'); hoverMarker.current = new Marker({ color: '#111827', scale: 0.7 });
       map.on('load', () => {
-        map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: routeFeatures(initialDays, selectedDay) } });
         map.addLayer({ id: 'route-shadow', type: 'line', source: 'routes', paint: { 'line-color': '#ffffff', 'line-width': 8, 'line-opacity': 0.88 } });
         map.addLayer({ id: 'routes', type: 'line', source: 'routes', paint: { 'line-color': ['get', 'color'], 'line-width': ['case', ['get', 'selected'], 5, 3], 'line-opacity': ['case', ['get', 'selected'], 1, 0.58] }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
         [
@@ -133,7 +142,7 @@ export default function Home() {
   }, [data]);
   useEffect(() => {
     const map = mapRef.current; if (!mapReady || !map || !days.length) return; const source = map.getSource('routes') as { setData: (data: unknown) => void } | undefined;
-    source?.setData({ type: 'FeatureCollection', features: days.filter((item) => item.points.length).map((item, index) => ({ type: 'Feature', properties: { color: ROUTE_COLORS[index % ROUTE_COLORS.length], selected: index === selectedDay }, geometry: { type: 'LineString', coordinates: item.points.map((point) => [point[0], point[1]]) } })) });
+    source?.setData({ type: 'FeatureCollection', features: routeFeatures(days, selectedDay) });
     if (day?.points.length) { const lngs = day.points.map((point) => point[0]); const lats = day.points.map((point) => point[1]); map.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 54, duration: 650, maxZoom: 12.6 }); }
   }, [days, day, selectedDay, mapReady]);
   const summary = useMemo(() => days.reduce((result, item) => ({ distance: result.distance + item.distance, ascent: result.ascent + item.ascent, descent: result.descent + item.descent }), { distance: 0, ascent: 0, descent: 0 }), [days]);
