@@ -99,12 +99,12 @@ function ElevationChart({ points, hover }: { points: Point[]; hover: (point?: Po
 function RouteMap({ data, days, selectedDay, hoverPoint }: { data: RouteData; days: Day[]; selectedDay: number; hoverPoint?: Point }) {
   const selected = days[selectedDay];
   const bounds = useMemo(() => {
-    const points = selected?.points.length ? selected.points : days.flatMap((item) => item.points);
+    const points = days.flatMap((item) => item.points);
     const lngs = points.map((point) => point[0]); const lats = points.map((point) => point[1]);
     const minLng = Math.min(...lngs); const maxLng = Math.max(...lngs); const minLat = Math.min(...lats); const maxLat = Math.max(...lats);
     const lngPad = Math.max((maxLng - minLng) * 0.12, 0.002); const latPad = Math.max((maxLat - minLat) * 0.12, 0.002);
     return { minLng: minLng - lngPad, maxLng: maxLng + lngPad, minLat: minLat - latPad, maxLat: maxLat + latPad };
-  }, [days, selected]);
+  }, [days]);
   const project = (point: Point) => [50 + (point[0] - bounds.minLng) / (bounds.maxLng - bounds.minLng) * 900, 650 - (point[1] - bounds.minLat) / (bounds.maxLat - bounds.minLat) * 600];
   const visibleMarkers = [
     ['帕克丁', '帕克丁'], ['Day1和day7南池住宿', '南池'], ['看到旁波切了', '旁波切'], ['Day2丁波切住宿', '丁波切'],
@@ -113,7 +113,7 @@ function RouteMap({ data, days, selectedDay, hoverPoint }: { data: RouteData; da
   ].flatMap(([name, label]) => { const marker = data.markers.find((item) => item.name === name); if (!marker) return []; const [x, y] = project(marker.coordinates); return x >= 20 && x <= 980 && y >= 20 && y <= 680 ? [{ label, x, y }] : []; });
   const hover = hoverPoint ? project(hoverPoint) : undefined;
   return <svg className="route-svg" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" aria-label="EBC 徒步路线地图">
-    <defs><pattern id="routeGrid" width="70" height="70" patternUnits="userSpaceOnUse" patternTransform="rotate(22)"><line x1="0" y1="0" x2="0" y2="70" stroke="#87948b" strokeOpacity="0.12" strokeWidth="2" /></pattern></defs>
+    <defs><pattern id="routeGrid" width="80" height="80" patternUnits="userSpaceOnUse"><path d="M 80 0 L 0 0 0 80" fill="none" stroke="#87948b" strokeOpacity="0.1" strokeWidth="2" /></pattern></defs>
     <rect width="1000" height="700" fill="#dfe4dc" /><rect width="1000" height="700" fill="url(#routeGrid)" />
     <g className="route-lines">
       {days.map((item, index) => index !== selectedDay && item.points.length ? <polyline key={item.key} points={item.points.map((point) => project(point).join(',')).join(' ')} stroke="#747b78" /> : null)}
