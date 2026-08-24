@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Map as MapLibreMap, Marker as MapLibreMarker } from 'maplibre-gl';
+import { useEffect, useMemo, useState } from 'react';
 
 type Point = [number, number, number];
 type RouteData = {
@@ -89,25 +88,6 @@ function buildItineraries(data: RouteData) {
   } as Record<number, Day[]>;
 }
 
-function routeFeatures(days: Day[], selectedDay: number) {
-  return days.filter((item) => item.points.length).map((item, index) => ({
-    type: 'Feature' as const,
-    properties: { color: ROUTE_COLORS[index % ROUTE_COLORS.length], selected: index === selectedDay },
-    geometry: { type: 'LineString' as const, coordinates: item.points.map((point) => [point[0], point[1]]) },
-  }));
-}
-
-function fullRouteFeature(days: Day[]) {
-  return {
-    type: 'Feature' as const,
-    properties: {},
-    geometry: {
-      type: 'LineString' as const,
-      coordinates: concat(...days.filter((item) => item.points.length).map((item) => item.points)).map((point) => [point[0], point[1]]),
-    },
-  };
-}
-
 function ElevationChart({ points, hover }: { points: Point[]; hover: (point?: Point) => void }) {
   const chartPoints = useMemo(() => { if (!points.length) return []; const step = Math.max(1, Math.ceil(points.length / 420)); return points.filter((_, index) => index % step === 0 || index === points.length - 1); }, [points]);
   if (!chartPoints.length) return <div className="empty-profile">休整日不计精确距离，支线根据天气现场决定。</div>;
@@ -116,58 +96,45 @@ function ElevationChart({ points, hover }: { points: Point[]; hover: (point?: Po
   return <div className="profile-wrap"><div className="profile-labels"><span>{Math.round(max)} m</span><span>{Math.round(min)} m</span></div><svg className="profile" viewBox="0 0 1000 190" preserveAspectRatio="none" onPointerMove={(event) => { const rect = event.currentTarget.getBoundingClientRect(); const index = Math.max(0, Math.min(chartPoints.length - 1, Math.round((event.clientX - rect.left) / rect.width * (chartPoints.length - 1)))); hover(chartPoints[index]); }} onPointerLeave={() => hover(undefined)} aria-label={`海拔剖面，最低 ${Math.round(min)} 米，最高 ${Math.round(max)} 米`}><defs><linearGradient id="profileFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ff6b35" stopOpacity="0.42" /><stop offset="1" stopColor="#ff6b35" stopOpacity="0.03" /></linearGradient></defs><polygon points={`0,190 ${polyline} 1000,190`} fill="url(#profileFill)" /><polyline points={polyline} fill="none" stroke="#ff6b35" strokeWidth="4" vectorEffect="non-scaling-stroke" /></svg></div>;
 }
 
+function RouteMap({ data, days, selectedDay, hoverPoint }: { data: RouteData; days: Day[]; selectedDay: number; hoverPoint?: Point }) {
+  const selected = days[selectedDay];
+  const bounds = useMemo(() => {
+    const points = selected?.points.length ? selected.points : days.flatMap((item) => item.points);
+    const lngs = points.map((point) => point[0]); const lats = points.map((point) => point[1]);
+    const minLng = Math.min(...lngs); const maxLng = Math.max(...lngs); const minLat = Math.min(...lats); const maxLat = Math.max(...lats);
+    const lngPad = Math.max((maxLng - minLng) * 0.12, 0.002); const latPad = Math.max((maxLat - minLat) * 0.12, 0.002);
+    return { minLng: minLng - lngPad, maxLng: maxLng + lngPad, minLat: minLat - latPad, maxLat: maxLat + latPad };
+  }, [days, selected]);
+  const project = (point: Point) => [50 + (point[0] - bounds.minLng) / (bounds.maxLng - bounds.minLng) * 900, 650 - (point[1] - bounds.minLat) / (bounds.maxLat - bounds.minLat) * 600];
+  const visibleMarkers = [
+    ['帕克丁', '帕克丁'], ['Day1和day7南池住宿', '南池'], ['看到旁波切了', '旁波切'], ['Day2丁波切住宿', '丁波切'],
+    ['Day3朱孔住宿', '朱孔'], ['Day4罗波切住宿', '罗波切'], ['EBC大本营', 'EBC'], ['Day5宗拉住宿', '宗拉'],
+    ['高桥', '高乔'], ['仁乔拉垭口', '仁乔拉'], ['朗顿', '朗顿'],
+  ].flatMap(([name, label]) => { const marker = data.markers.find((item) => item.name === name); if (!marker) return []; const [x, y] = project(marker.coordinates); return x >= 20 && x <= 980 && y >= 20 && y <= 680 ? [{ label, x, y }] : []; });
+  const hover = hoverPoint ? project(hoverPoint) : undefined;
+  return <svg className="route-svg" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" aria-label="EBC 徒步路线地图">
+    <defs><pattern id="routeGrid" width="70" height="70" patternUnits="userSpaceOnUse" patternTransform="rotate(22)"><line x1="0" y1="0" x2="0" y2="70" stroke="#87948b" strokeOpacity="0.12" strokeWidth="2" /></pattern></defs>
+    <rect width="1000" height="700" fill="#dfe4dc" /><rect width="1000" height="700" fill="url(#routeGrid)" />
+    <g className="route-lines">{days.map((item, index) => item.points.length ? <polyline key={item.key} points={item.points.map((point) => project(point).join(',')).join(' ')} className={index === selectedDay ? 'selected' : ''} stroke={ROUTE_COLORS[index % ROUTE_COLORS.length]} /> : null)}</g>
+    <g className="svg-markers">{visibleMarkers.map((marker) => <g key={marker.label} transform={`translate(${marker.x} ${marker.y})`}><circle r="5" /><line y2="-18" /><text y="-23">{marker.label}</text></g>)}</g>
+    {hover && <circle className="route-hover" cx={hover[0]} cy={hover[1]} r="9" />}
+  </svg>;
+}
+
 export default function Home() {
-  const [data, setData] = useState<RouteData | null>(null); const [version, setVersion] = useState(8); const [selectedDay, setSelectedDay] = useState(0); const [mapReady, setMapReady] = useState(false);
-  const mapContainer = useRef<HTMLDivElement>(null); const mapRef = useRef<MapLibreMap | null>(null); const hoverMarker = useRef<MapLibreMarker | null>(null);
+  const [data, setData] = useState<RouteData | null>(null); const [version, setVersion] = useState(8); const [selectedDay, setSelectedDay] = useState(0); const [hoverPoint, setHoverPoint] = useState<Point>();
   useEffect(() => { fetch(new URL('route-data.json', document.baseURI)).then((response) => response.json()).then(setData); }, []);
   const itineraries = useMemo(() => data ? buildItineraries(data) : null, [data]);
   const days = useMemo(() => itineraries?.[version] ?? [], [itineraries, version]);
   const day = days[Math.min(selectedDay, Math.max(days.length - 1, 0))];
-  useEffect(() => {
-    if (!mapContainer.current || mapRef.current || !data) return; let cancelled = false;
-    const initialDays = buildItineraries(data)[version] ?? [];
-    import('maplibre-gl').then(({ Map, NavigationControl, Marker }) => {
-      if (cancelled || !mapContainer.current) return;
-      const map = new Map({ container: mapContainer.current, center: [86.72, 27.86], zoom: 9.1, style: { version: 8, sources: {}, layers: [{ id: 'terrain-background', type: 'background', paint: { 'background-color': '#dfe4dc' } }] }, attributionControl: false });
-      map.addControl(new NavigationControl({ showCompass: true }), 'top-right'); hoverMarker.current = new Marker({ color: '#111827', scale: 0.7 });
-      map.on('load', () => {
-        map.addSource('full-route', { type: 'geojson', data: fullRouteFeature(initialDays) });
-        map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: routeFeatures(initialDays, selectedDay) } });
-        map.addLayer({ id: 'route-shadow', type: 'line', source: 'full-route', paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.96 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
-        map.addLayer({ id: 'full-route', type: 'line', source: 'full-route', paint: { 'line-color': '#4b5563', 'line-width': 6, 'line-opacity': 0.9 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
-        map.addLayer({ id: 'routes', type: 'line', source: 'routes', paint: { 'line-color': ['get', 'color'], 'line-width': ['case', ['get', 'selected'], 7, 4], 'line-opacity': ['case', ['get', 'selected'], 1, 0.72] }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
-        [
-          ['帕克丁', '帕克丁'], ['Day1和day7南池住宿', '南池'], ['看到旁波切了', '旁波切'],
-          ['Day2丁波切住宿', '丁波切'], ['Day3朱孔住宿', '朱孔'], ['Day4罗波切住宿', '罗波切'],
-          ['EBC大本营', 'EBC'], ['Day5宗拉住宿', '宗拉'], ['高桥', '高乔'], ['仁乔拉垭口', '仁乔拉'], ['朗顿', '朗顿'],
-        ].forEach(([markerName, displayName]) => {
-          const place = data.markers.find((item) => item.name === markerName);
-          if (!place) return;
-          const element = document.createElement('div');
-          element.className = 'place-marker';
-          element.textContent = displayName;
-          new Marker({ element, anchor: 'bottom' }).setLngLat([place.coordinates[0], place.coordinates[1]]).addTo(map);
-        });
-        mapRef.current = map;
-        setMapReady(true);
-      });
-    }); return () => { cancelled = true; };
-  }, [data]);
-  useEffect(() => {
-    const map = mapRef.current; if (!mapReady || !map || !days.length) return; const source = map.getSource('routes') as { setData: (data: unknown) => void } | undefined;
-    source?.setData({ type: 'FeatureCollection', features: routeFeatures(days, selectedDay) });
-    const fullSource = map.getSource('full-route') as { setData: (data: unknown) => void } | undefined;
-    fullSource?.setData(fullRouteFeature(days));
-    if (day?.points.length) { const lngs = day.points.map((point) => point[0]); const lats = day.points.map((point) => point[1]); map.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 54, duration: 650, maxZoom: 12.6 }); }
-  }, [days, day, selectedDay, mapReady]);
   const summary = useMemo(() => days.reduce((result, item) => ({ distance: result.distance + item.distance, ascent: result.ascent + item.ascent, descent: result.descent + item.descent }), { distance: 0, ascent: 0, descent: 0 }), [days]);
   const selectedLodging = day ? lodging[day.lodgingKey] : undefined; const maxAltitude = day?.points.length ? Math.max(...day.points.map((point) => point[2])) : selectedLodging?.elevation ?? 0; const endAltitude = day?.points.at(-1)?.[2] ?? selectedLodging?.elevation ?? 0;
-  const handleHover = (point?: Point) => { if (!mapRef.current || !hoverMarker.current) return; if (!point) { hoverMarker.current.remove(); return; } hoverMarker.current.setLngLat([point[0], point[1]]).addTo(mapRef.current); };
+  const handleHover = (point?: Point) => setHoverPoint(point);
   return <main>
     <header className="topbar"><a className="brand" href="#top" aria-label="返回顶部"><span className="brand-mark">E</span><span><strong>EBC THREE PASSES</strong><small>路线规划器</small></span></a><div className="source-pill">两步路轨迹 #{data?.meta.trackId ?? '—'} · 路飞在路上</div></header>
     <section id="top" className="hero"><div><p className="eyebrow">SURKE · EVEREST BASE CAMP · GOKYO</p><h1>8–13 天 EBC<br /><em>三垭口大环线</em></h1><p className="hero-copy">同一条 152.9 公里实走轨迹，通过合理拆分住宿日降低单日强度。地图、每日数据与海拔剖面来自原始 KML。</p></div><div className="route-summary"><span>当前方案</span><strong>{version}<small> 天</small></strong><dl><div><dt>总距离</dt><dd>{summary.distance.toFixed(1)} km</dd></div><div><dt>累计爬升</dt><dd>{Math.round(summary.ascent).toLocaleString()} m</dd></div><div><dt>累计下降</dt><dd>{Math.round(summary.descent).toLocaleString()} m</dd></div></dl></div></section>
     <nav className="version-switch" aria-label="选择行程版本">{[8, 9, 10, 11, 12, 13].map((item) => <button key={item} className={version === item ? 'active' : ''} onClick={() => { setVersion(item); setSelectedDay(0); }}><strong>{item}</strong><span>天版</span></button>)}</nav>
-    <section className="planner"><aside className="day-rail"><div className="section-heading"><span>每日行程</span><small>{days.length} STAGES</small></div><div className="day-list">{days.map((item, index) => <button key={`${version}-${item.key}`} className={selectedDay === index ? 'day-card active' : 'day-card'} onClick={() => setSelectedDay(index)}><span className="day-number">{String(index + 1).padStart(2, '0')}</span><span className="day-name"><strong>{item.shortTitle}</strong><small>{item.optional ? '天气窗口支线' : `${item.distance.toFixed(1)} km · +${item.ascent} m`}</small></span><i style={{ background: ROUTE_COLORS[index % ROUTE_COLORS.length] }} /></button>)}</div></aside><div className="map-panel"><div ref={mapContainer} className="map" aria-label="EBC 徒步路线地图" />{!mapReady && <div className="map-loading">正在加载路线地图…</div>}<div className="map-legend"><span><i className="solid" />当前日</span><span><i className="dashed" />其他行程</span></div><div className="map-title"><small>DAY {String(selectedDay + 1).padStart(2, '0')}</small><strong>{day?.title ?? '加载路线'}</strong></div></div></section>
+    <section className="planner"><aside className="day-rail"><div className="section-heading"><span>每日行程</span><small>{days.length} STAGES</small></div><div className="day-list">{days.map((item, index) => <button key={`${version}-${item.key}`} className={selectedDay === index ? 'day-card active' : 'day-card'} onClick={() => setSelectedDay(index)}><span className="day-number">{String(index + 1).padStart(2, '0')}</span><span className="day-name"><strong>{item.shortTitle}</strong><small>{item.optional ? '天气窗口支线' : `${item.distance.toFixed(1)} km · +${item.ascent} m`}</small></span><i style={{ background: ROUTE_COLORS[index % ROUTE_COLORS.length] }} /></button>)}</div></aside><div className="map-panel">{data && <RouteMap data={data} days={days} selectedDay={selectedDay} hoverPoint={hoverPoint} />}<div className="map-legend"><span><i className="solid" />当前日</span><span><i className="dashed" />其他行程</span></div><div className="map-title"><small>DAY {String(selectedDay + 1).padStart(2, '0')}</small><strong>{day?.title ?? '加载路线'}</strong></div></div></section>
     {day && <section className="details"><div className="detail-main"><div className="section-heading"><span>当日数据</span><small>基于 KML 与原始记录</small></div><div className="metrics"><div><span>距离</span><strong>{day.distance.toFixed(2)}</strong><small>km</small></div><div><span>爬升</span><strong>{day.ascent}</strong><small>m</small></div><div><span>下降</span><strong>{day.descent}</strong><small>m</small></div><div><span>最高</span><strong>{Math.round(maxAltitude)}</strong><small>m</small></div><div><span>终点</span><strong>{Math.round(endAltitude)}</strong><small>m</small></div></div><ElevationChart points={day.points} hover={handleHover} /><div className="field-note"><span>实走提示</span><p>{day.note}</p></div></div><aside className="lodging-card"><div className="lodging-top"><span>终点住宿</span><strong>{day.lodgingKey}</strong><small>约 {selectedLodging?.elevation ?? Math.round(endAltitude)} m</small></div><p>{selectedLodging?.summary}</p><div className="service-tags">{selectedLodging?.services.map((service) => <span key={service}>{service}</span>)}</div><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedLodging?.search ?? `${day.lodgingKey} lodge Nepal`)}`} target="_blank" rel="noreferrer">在 Google Maps 查看住宿 ↗</a><small className="lodging-disclaimer">营业、价格和床位受季节与天气影响，出发前再次确认。</small></aside></section>}
     <section className="safety"><span className="safety-index">01</span><div><p className="eyebrow">ROUTE PRINCIPLE</p><h2>路线不变，<em>让强度回到可控范围。</em></h2></div><p>8 天版只适合具备多次高海拔重装经验、体能耐力中上且能独立判断天气与撤退时机的人。更长版本通过帕克丁、旁波切、罗波切、朗顿与高乔休整逐步降低单日负担，但不会消除高反、冰雪垭口、迷路和突发天气风险。</p></section>
     <footer><span>EBC ROUTE PLANNER</span><span>数据源：两步路 KML · 作者：路飞在路上</span></footer>
