@@ -136,6 +136,7 @@ export default function Home() {
           new Marker({ element, anchor: 'bottom' }).setLngLat([place.coordinates[0], place.coordinates[1]]).addTo(map);
         });
         mapRef.current = map;
+        (window as unknown as { __ebcMap?: MapLibreMap }).__ebcMap = map;
         setMapReady(true);
       });
     }); return () => { cancelled = true; };
