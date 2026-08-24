@@ -115,7 +115,10 @@ function RouteMap({ data, days, selectedDay, hoverPoint }: { data: RouteData; da
   return <svg className="route-svg" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" aria-label="EBC 徒步路线地图">
     <defs><pattern id="routeGrid" width="70" height="70" patternUnits="userSpaceOnUse" patternTransform="rotate(22)"><line x1="0" y1="0" x2="0" y2="70" stroke="#87948b" strokeOpacity="0.12" strokeWidth="2" /></pattern></defs>
     <rect width="1000" height="700" fill="#dfe4dc" /><rect width="1000" height="700" fill="url(#routeGrid)" />
-    <g className="route-lines">{days.map((item, index) => item.points.length ? <polyline key={item.key} points={item.points.map((point) => project(point).join(',')).join(' ')} className={index === selectedDay ? 'selected' : ''} stroke={ROUTE_COLORS[index % ROUTE_COLORS.length]} /> : null)}</g>
+    <g className="route-lines">
+      {days.map((item, index) => index !== selectedDay && item.points.length ? <polyline key={item.key} points={item.points.map((point) => project(point).join(',')).join(' ')} stroke="#747b78" /> : null)}
+      {selected?.points.length ? <polyline key={selected.key} points={selected.points.map((point) => project(point).join(',')).join(' ')} className="selected" stroke={ROUTE_COLORS[selectedDay % ROUTE_COLORS.length]} /> : null}
+    </g>
     <g className="svg-markers">{visibleMarkers.map((marker) => <g key={marker.label} transform={`translate(${marker.x} ${marker.y})`}><circle r="5" /><line y2="-18" /><text y="-23">{marker.label}</text></g>)}</g>
     {hover && <circle className="route-hover" cx={hover[0]} cy={hover[1]} r="9" />}
   </svg>;
