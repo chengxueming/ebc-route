@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Map as MapLibreMap, Marker as MapLibreMarker } from 'maplibre-gl';
 
 type Point = [number, number, number];
 type RouteData = {
@@ -97,31 +98,28 @@ function ElevationChart({ points, hover }: { points: Point[]; hover: (point?: Po
 }
 
 function RouteMap({ data, days, selectedDay, hoverPoint }: { data: RouteData; days: Day[]; selectedDay: number; hoverPoint?: Point }) {
-  const selected = days[selectedDay];
-  const bounds = useMemo(() => {
-    const points = days.flatMap((item) => item.points);
-    const lngs = points.map((point) => point[0]); const lats = points.map((point) => point[1]);
-    const minLng = Math.min(...lngs); const maxLng = Math.max(...lngs); const minLat = Math.min(...lats); const maxLat = Math.max(...lats);
-    const lngPad = Math.max((maxLng - minLng) * 0.12, 0.002); const latPad = Math.max((maxLat - minLat) * 0.12, 0.002);
-    return { minLng: minLng - lngPad, maxLng: maxLng + lngPad, minLat: minLat - latPad, maxLat: maxLat + latPad };
-  }, [days]);
-  const project = (point: Point) => [50 + (point[0] - bounds.minLng) / (bounds.maxLng - bounds.minLng) * 900, 650 - (point[1] - bounds.minLat) / (bounds.maxLat - bounds.minLat) * 600];
-  const visibleMarkers = [
-    ['帕克丁', '帕克丁'], ['Day1和day7南池住宿', '南池'], ['看到旁波切了', '旁波切'], ['Day2丁波切住宿', '丁波切'],
-    ['Day3朱孔住宿', '朱孔'], ['Day4罗波切住宿', '罗波切'], ['EBC大本营', 'EBC'], ['Day5宗拉住宿', '宗拉'],
-    ['高桥', '高乔'], ['仁乔拉垭口', '仁乔拉'], ['朗顿', '朗顿'],
-  ].flatMap(([name, label]) => { const marker = data.markers.find((item) => item.name === name); if (!marker) return []; const [x, y] = project(marker.coordinates); return x >= 20 && x <= 980 && y >= 20 && y <= 680 ? [{ label, x, y }] : []; });
-  const hover = hoverPoint ? project(hoverPoint) : undefined;
-  return <svg className="route-svg" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" aria-label="EBC 徒步路线地图">
-    <defs><pattern id="routeGrid" width="80" height="80" patternUnits="userSpaceOnUse"><path d="M 80 0 L 0 0 0 80" fill="none" stroke="#87948b" strokeOpacity="0.1" strokeWidth="2" /></pattern></defs>
-    <rect width="1000" height="700" fill="#dfe4dc" /><rect width="1000" height="700" fill="url(#routeGrid)" />
-    <g className="route-lines">
-      {days.map((item, index) => index !== selectedDay && item.points.length ? <polyline key={item.key} points={item.points.map((point) => project(point).join(',')).join(' ')} stroke="#747b78" /> : null)}
-      {selected?.points.length ? <polyline key={selected.key} points={selected.points.map((point) => project(point).join(',')).join(' ')} className="selected" stroke={ROUTE_COLORS[selectedDay % ROUTE_COLORS.length]} /> : null}
-    </g>
-    <g className="svg-markers">{visibleMarkers.map((marker) => <g key={marker.label} transform={`translate(${marker.x} ${marker.y})`}><circle r="5" /><line y2="-18" /><text y="-23">{marker.label}</text></g>)}</g>
-    {hover && <circle className="route-hover" cx={hover[0]} cy={hover[1]} r="9" />}
-  </svg>;
+  const container = useRef<HTMLDivElement>(null); const mapRef = useRef<MapLibreMap | null>(null); const hoverMarker = useRef<MapLibreMarker | null>(null); const [failed, setFailed] = useState(false);
+  const features = useMemo(() => days.filter((item) => item.points.length).map((item, index) => ({ type: 'Feature' as const, properties: { selected: index === selectedDay, color: ROUTE_COLORS[index % ROUTE_COLORS.length] }, geometry: { type: 'LineString' as const, coordinates: item.points.map((point) => [point[0], point[1]]) } })), [days, selectedDay]);
+  useEffect(() => {
+    if (!container.current || mapRef.current) return; let cancelled = false;
+    import('maplibre-gl').then(({ Map, Marker, NavigationControl }) => {
+      if (cancelled || !container.current) return;
+      const map = new Map({ container: container.current, center: [86.72, 27.86], zoom: 9.1, pitch: 0, bearing: 0, attributionControl: false, style: { version: 8, sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#dfe4dc' } }] } });
+      map.addControl(new NavigationControl({ showCompass: true }), 'top-right'); hoverMarker.current = new Marker({ color: '#111827', scale: 0.7 });
+      map.on('error', (event) => { if (String(event.error).includes('worker')) setFailed(true); });
+      map.on('load', () => {
+        map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features } });
+        map.addLayer({ id: 'other-routes', type: 'line', source: 'routes', filter: ['==', ['get', 'selected'], false], paint: { 'line-color': '#747b78', 'line-width': 3, 'line-opacity': 0.55, 'line-dasharray': [2, 2] }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+        map.addLayer({ id: 'selected-route-shadow', type: 'line', source: 'routes', filter: ['==', ['get', 'selected'], true], paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.92 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+        map.addLayer({ id: 'selected-route', type: 'line', source: 'routes', filter: ['==', ['get', 'selected'], true], paint: { 'line-color': ['get', 'color'], 'line-width': 6 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+        [['帕克丁', '帕克丁'], ['Day1和day7南池住宿', '南池'], ['看到旁波切了', '旁波切'], ['Day2丁波切住宿', '丁波切'], ['Day3朱孔住宿', '朱孔'], ['Day4罗波切住宿', '罗波切'], ['EBC大本营', 'EBC'], ['Day5宗拉住宿', '宗拉'], ['高桥', '高乔'], ['仁乔拉垭口', '仁乔拉'], ['朗顿', '朗顿']].forEach(([name, label]) => { const place = data.markers.find((item) => item.name === name); if (!place) return; const element = document.createElement('div'); element.className = 'place-marker'; element.textContent = label; new Marker({ element, anchor: 'bottom' }).setLngLat([place.coordinates[0], place.coordinates[1]]).addTo(map); });
+        const all = days.flatMap((item) => item.points); const lngs = all.map((point) => point[0]); const lats = all.map((point) => point[1]); map.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 58, duration: 0 }); mapRef.current = map;
+      });
+    }).catch(() => setFailed(true)); return () => { cancelled = true; };
+  }, [data]);
+  useEffect(() => { const source = mapRef.current?.getSource('routes') as { setData: (data: unknown) => void } | undefined; source?.setData({ type: 'FeatureCollection', features }); }, [features]);
+  useEffect(() => { if (!mapRef.current || !hoverMarker.current) return; if (!hoverPoint) { hoverMarker.current.remove(); return; } hoverMarker.current.setLngLat([hoverPoint[0], hoverPoint[1]]).addTo(mapRef.current); }, [hoverPoint]);
+  return <><div ref={container} className="map" aria-label="EBC 徒步路线地图" />{failed && <div className="map-loading">当前浏览器无法绘制交互地图，请刷新或更换浏览器。</div>}</>;
 }
 
 export default function Home() {
